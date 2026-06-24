@@ -112,7 +112,7 @@ export const loginAction = async (formData: FormData) => {
     try {
         await connectDb()
         const user = await User.findOne({ email })
-        
+
         let redirectTo = "/buyer"
         if (user && user.role && user.role.includes('admin')) {
             redirectTo = "/admin"
@@ -124,12 +124,16 @@ export const loginAction = async (formData: FormData) => {
             redirectTo
         })
     } catch (error: any) {
-        // If it's a login failure, redirect back to login with error
         if (error?.type === 'CredentialsSignin' || error?.message?.includes('CredentialsSignin')) {
             return redirect('/login?error=invalid-credentials')
         }
-        // Auth.js successful login throws a Redirect error, must rethrow
-        throw error
+        // NEXT_REDIRECT means successful login — must propagate
+        if (error?.digest?.startsWith('NEXT_REDIRECT')) {
+            throw error
+        }
+        // Everything else: DB connection failures, network errors, etc.
+        console.error("Login error:", error)
+        return redirect('/login?error=server-error')
     }
 }
 

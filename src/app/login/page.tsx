@@ -18,6 +18,7 @@ export default async function LoginPage ({searchParams} : LoginPageProps) {
     const errorMessages = {
         'invalid-credentials': 'Invalid email or password, please try again.',
         'email-exists': 'An account with this email already exists.',
+        'server-error': 'A server error occurred. Please ensure MONGODB_URI and AUTH_URL are configured correctly in your environment.',
     }
     
     const errorMessage = params?.error ? errorMessages[params?.error as keyof typeof errorMessages] : null
