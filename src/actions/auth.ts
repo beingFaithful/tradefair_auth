@@ -1,64 +1,143 @@
 'use server'
-import { createJWT, hashPassword, verifyPassword } from "@/lib/auth"
-import { redirect } from "next/navigation"
 import User from "@/models/User"
-import {cookies } from "next/headers"
+import SpecialID from "@/models/SpecialID"
 import connectDb from "db"
+import { signIn, signOut } from "../../auth"
+import { hashPassword } from "@/lib/auth"
+import { redirect } from "next/navigation"
+import { z } from "zod"
+import { COLLEGE_DEPARTMENTS } from "@/lib/college-data"
 
+const signUpSchema = z.object({
+    identifier: z.string().min(1, "Identifier is required").max(200),
+    password: z.string().min(8, "Password must be at least 8 characters"),
+    type: z.enum(['student_email', 'special_id']),
+    firstName: z.string().min(1).max(100).trim(),
+    lastName: z.string().min(1).max(100).trim(),
+    gender: z.enum(['male', 'female', 'other']),
+    level: z.enum(['100', '200', '300', '400', '500']).nullish(),
+    department: z.string().max(100).trim().nullish(),
+    college: z.enum(['CBAS', 'CHMS', 'CAHS']).nullish(),
+})
 
 export async function signUpAction(formData: FormData) {
-    await connectDb();
-    const email = formData.get("email") as string
-    const password = formData.get("password") as string
+    // Validate input with Zod
+    const parsed = signUpSchema.safeParse({
+        identifier: formData.get("identifier"),
+        password: formData.get("password"),
+        type: formData.get("type"),
+        firstName: formData.get("firstName"),
+        lastName: formData.get("lastName"),
+        gender: formData.get("gender"),
+        level: formData.get("level"),
+        department: formData.get("department"),
+        college: formData.get("college"),
+    })
 
-    const existingUser = await User.findOne({ email})
+    if (!parsed.success) {
+        redirect('/signup?error=missing-fields')
+    }
+
+    const { identifier, password, type, firstName, lastName, gender, level, department, college } = parsed.data
+
+    // Validate department belongs to selected college
+    if (type === 'student_email' && department && college) {
+        const validDepts = COLLEGE_DEPARTMENTS[college] || [];
+        if (!validDepts.some(d => d.toLowerCase() === department.toLowerCase())) {
+            redirect(`/signup?error=invalid-department`)
+        }
+    }
+
+    await connectDb();
+
+    let finalEmail = identifier;
+
+    if (type === 'student_email') {
+        const expectedEmail = `${firstName.toLowerCase()}${lastName.toLowerCase()}@mtu.edu.ng`;
+        if (identifier.toLowerCase() !== expectedEmail) {
+            redirect(`/signup?error=invalid-email`)
+        }
+        if (!level) redirect('/signup?error=missing-fields');
+        if (!college) redirect('/signup?error=missing-fields');
+    } else if (type === 'special_id') {
+        // Check if Special ID exists and is unclaimed
+        const specialIDDoc = await SpecialID.findOne({ code: identifier, isClaimed: false });
+        if (!specialIDDoc) {
+            redirect('/signup?error=invalid-special-id')
+        }
+        // For special IDs, we use the ID as the "email" for login purposes
+        finalEmail = identifier;
+    } else {
+        redirect('/signup?error=missing-fields')
+    }
+
+    const existingUser = await User.findOne({ email: finalEmail })
     if (existingUser){
-        redirect('/login?error=email-exists')
+        redirect('/signup?error=email-exists')
     }
 
     const hashedPassword = await hashPassword(password)
-    const user = await User.create({
-        email,
-        password: hashedPassword
+    const newUser = await User.create({
+        email: finalEmail,
+        identifierType: type,
+        password: hashedPassword,
+        firstName,
+        lastName,
+        gender,
+        ...(level ? { level } : {}),
+        ...(department ? { department } : {}),
+        ...(college ? { college } : {}),
     })
-    const token = await createJWT(email, user._id.toString())
-    const cookieStore = await cookies()
-    cookieStore.set("token", token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        maxAge:60 * 60 * 24,
-        path: "/"
+
+    // If it was a special ID, mark it as claimed
+    if (type === 'special_id') {
+        await SpecialID.findOneAndUpdate(
+            { code: identifier },
+            { isClaimed: true, claimedBy: newUser._id }
+        );
+    }
+    
+    // Automatically sign in after signup
+    await signIn("credentials", {
+        email: finalEmail,
+        password,
+        redirectTo: "/buyer"
     })
-    redirect("/dashboard")
 }
+
 export const loginAction = async (formData: FormData) => {
     const email = formData.get("email") as string
     const password = formData.get("password") as string
 
-    const existingUser = await User.findOne({ email})
-    if (!existingUser){
-        redirect('/login?error=Invalid-credentials')
-    }
+    try {
+        await connectDb()
+        const user = await User.findOne({ email })
+        
+        let redirectTo = "/buyer"
+        if (user && user.role && user.role.includes('admin')) {
+            redirectTo = "/admin"
+        }
 
-    const isValid = await verifyPassword(password, existingUser.password)
-    if (!isValid){
-        redirect('/login?error=Invalid-credentials')
+        await signIn("credentials", {
+            email,
+            password,
+            redirectTo
+        })
+    } catch (error: any) {
+        // If it's a login failure, redirect back to login with error
+        if (error?.type === 'CredentialsSignin' || error?.message?.includes('CredentialsSignin')) {
+            return redirect('/login?error=invalid-credentials')
+        }
+        // Auth.js successful login throws a Redirect error, must rethrow
+        throw error
     }
-
-     const token = await createJWT(email, existingUser._id.toString())
-    const cookieStore = await cookies()
-    cookieStore.set("token", token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        maxAge:60 * 60 * 24,
-        path: "/"
-    })
-    redirect("/dashboard")
 }
 
+
 export const logoutAction = async () => {
-        const cookieStore = await cookies()
-        cookieStore.delete("token")
-    }
+    await signOut({ redirectTo: "/login" })
+}
 
-
+export const googleSignInAction = async () => {
+    await signIn("google", { redirectTo: "/buyer" })
+}

@@ -15,3 +15,11 @@ export const verifyPassword = async (password: string, hash: string): Promise<bo
 export const createJWT = async (email: string, userId: string): Promise<string> => {
   return jwt.sign({ email, userId }, JWT_SECRET, { expiresIn: '1d' });
 };
+
+export const verifyJWT = async (token: string): Promise<any> => {
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch (error) {
+    return null;
+  }
+};
