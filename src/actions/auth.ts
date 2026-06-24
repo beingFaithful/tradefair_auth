@@ -98,11 +98,17 @@ export async function signUpAction(formData: FormData) {
     }
     
     // Automatically sign in after signup
-    await signIn("credentials", {
-        email: finalEmail,
-        password,
-        redirectTo: "/buyer"
-    })
+    try {
+        await signIn("credentials", {
+            email: finalEmail,
+            password,
+            redirect: false,
+        })
+    } catch {
+        // Ignore — user was created, redirect to login as fallback
+        redirect("/login")
+    }
+    redirect("/buyer")
 }
 
 export const loginAction = async (formData: FormData) => {
