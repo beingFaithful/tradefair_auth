@@ -139,7 +139,12 @@ export const loginAction = async (formData: FormData) => {
 
 
 export const logoutAction = async () => {
-    await signOut({ redirectTo: "/login" })
+    try {
+        await signOut({ redirect: false })
+    } catch (e) {
+        // signOut may throw if session is already invalid; ignore
+    }
+    redirect("/login")
 }
 
 export const googleSignInAction = async () => {
