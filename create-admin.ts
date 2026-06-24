@@ -4,7 +4,7 @@ import { hashPassword } from "./src/lib/auth";
 import mongoose from "mongoose";
 
 async function createAdmin() {
-    process.env.MONGODB_URI = "mongodb://localhost:27017/tradefair-auth";
+    process.env.MONGODB_URI ||= "mongodb://localhost:27017/tradefair-auth";
     try {
         await connectDb();
         const email = "admin@mtu.edu.ng";
